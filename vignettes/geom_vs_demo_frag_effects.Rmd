@@ -1,0 +1,215 @@
+---
+title: "Disentangle geometric and demographic fragmentation effects
+        using spatially-explicit rarefaction curves"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Disentangle geometric and demographic fragmentation effects}
+  %\VignetteEncoding{UTF-8}
+  %\VignetteEngine{knitr::rmarkdown}
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  fig.width = 7.2
+)
+```
+
+```{r setup}
+library(spatialbiodiv)
+library(tidyverse)
+library(vegan)
+library(scam)
+library(mobr)
+knitr::opts_knit$set(root.dir = "..")
+```
+
+# Read and prepare the data
+
+```{r}
+#setwd("..")
+simdat1 <- read.table("data_raw/dispersal_4_rep_1_output_sample.csv", header = TRUE,
+                      sep = ",")
+#simdat1 <- simdat1 %>% select(-X)
+```
+
+## Filter high and low fragmentation scenarios at two different time points
+
+Time point **t0** is with geometric effects only and **tend** with
+geometric demographic effects
+
+```{r}
+sim1 <- 10
+sim2 <- 18
+t0 <- 41
+tend <- 100
+
+frag_low_t0 <- simdat1 %>% filter(sim_id == sim1 & step == t0)
+frag_high_t0 <- simdat1 %>% filter(sim_id == sim2 & step == t0)
+
+frag_low_tend <- simdat1 %>% filter(sim_id == sim1 & step == tend)
+frag_high_tend <- simdat1 %>%filter(sim_id == sim2 & step == tend)
+
+nsamples <- nrow(frag_low_t0)
+```
+
+## Prepare data for spatial biodiversity curves
+
+Get abundance tables with samples in rows and species in columns
+
+```{r}
+spec_frag_low_t0 <- frag_low_t0 %>% select(sp_1:sp_1000)
+spec_frag_high_t0 <- frag_high_t0 %>% select(sp_1:sp_1000)
+spec_frag_low_tend <- frag_low_tend %>% select(sp_1:sp_1000)
+spec_frag_high_tend <- frag_high_tend %>% select(sp_1:sp_1000)
+```
+
+Get spatial coordinates of the samples. The coordinates are the same for
+both time points. So they are needed only once per fragmentation
+scenario.
+
+```{r}
+xy_frag_low <-  frag_low_t0 %>%  select(loc_x, loc_y)
+xy_frag_high <-  frag_high_t0 %>% select(loc_x, loc_y)
+```
+
+# Plot coordinates of the samples
+
+```{r}
+xy_coords <- bind_rows(xy_frag_low, xy_frag_high)
+xy_coords$fragmentation <-  rep(c("Low", "High"), each = nsamples)
+```
+
+```{r}
+ggplot(xy_coords, aes(loc_x, loc_y)) +
+  geom_point() +
+  facet_grid(~fragmentation) +
+  coord_fixed()
+```
+
+# Calculate non-spatial sample-based rarefaction curves (SBR)
+
+```{r}
+SBR_frag_low_t0 <- rarefaction(spec_frag_low_t0, method = "SBR")
+SBR_frag_high_t0 <- rarefaction(spec_frag_high_t0, method = "SBR")
+SBR_frag_low_tend <- rarefaction(spec_frag_low_tend, method = "SBR")
+SBR_frag_high_tend <- rarefaction(spec_frag_high_tend, method = "SBR")
+```
+
+```{r}
+SBR_data <- data.frame(nsamples = rep(1:nsamples, 4),
+                       S       = c(SBR_frag_low_t0,
+                                   SBR_frag_high_t0,
+                                   SBR_frag_low_tend,
+                                   SBR_frag_high_tend),
+                       fragmentation = rep(c("Low", "High","Low","High"),
+                                           each = nsamples),
+                       time = rep(c("t0","t0","tend","tend"),
+                                  each = nsamples)
+                       )
+```
+
+## Plot SBR curves
+
+```{r}
+ggplot(SBR_data, aes(nsamples, S, color = fragmentation)) +
+  geom_point() +
+  geom_line() + 
+  facet_grid(~time) +
+  ggtitle("Non-spatial rarefaction curves")
+```
+
+# Calculate spatially explicit sample-based rarefaction curves (spexSBR)
+
+## With convexhull-Algorithm
+
+```{r}
+sSBR_frag_low_t0 <- rarefaction(spec_frag_low_t0, method = "spexSBR", coords = xy_frag_low,
+                                latlong = F, spat_algo = "convexhull")
+
+sSBR_frag_high_t0 <- rarefaction(spec_frag_high_t0, method = "spexSBR", coords = xy_frag_high,
+                                latlong = F, spat_algo = "convexhull")
+
+sSBR_frag_low_tend <- rarefaction(spec_frag_low_tend, method = "spexSBR", coords = xy_frag_low,
+                                  latlong = F, spat_algo = "convexhull")
+
+sSBR_frag_high_tend <- rarefaction(spec_frag_high_tend, method = "spexSBR", coords = xy_frag_high,
+                                  latlong = F, spat_algo = "convexhull")
+```
+
+### Create dataframe for plotting with ggplot
+
+```{r}
+sSBR_length <- length(sSBR_frag_low_t0)
+
+sSBR_data <- data.frame(area = as.numeric(c(names(sSBR_frag_low_t0),
+                                            names(sSBR_frag_high_t0),
+                                            names(sSBR_frag_low_tend),
+                                            names(sSBR_frag_high_tend))),
+                        S       = c(sSBR_frag_low_t0,
+                                    sSBR_frag_high_t0,
+                                    sSBR_frag_low_tend,
+                                    sSBR_frag_high_tend),
+                        fragmentation = rep(c("Low", "High","Low","High"),
+                                         each = sSBR_length),
+                        time = rep(c("t0","t0","tend","tend"),
+                                   each = sSBR_length)
+                        )
+```
+
+### Plot the spexSBR curves
+
+```{r}
+ggplot(sSBR_data, aes(area, S, color = fragmentation)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(~time) +
+  ggtitle("Spatially-explicit rarefaction curve with convex-hull area") 
+```
+
+# Calculate spexSBR differences and null-model with lower and upper bound
+
+## Get the distance / area values from the curve with the smaller extent
+
+Since the coordinates to not change over time, the spatial effort from
+just one time step is needed.
+
+```{r}
+spat_eff <- sSBR_data %>%
+  filter(fragmentation == "Low" & time == "t0") %>%
+  select(area)
+spat_eff <- as.numeric(spat_eff[[1]])
+```
+
+```{r, eval = F}
+delta_t0 <- get_spexSBR_interval(comm1 = frag_low_t0, coords1 = xy_frag_low,
+                                 comm2 = frag_high_t0, coords2 = xy_frag_high,
+                                 spat_effort = spat_eff, nperm = 30)
+
+delta_tend <- get_spexSBR_interval(comm1 = frag_low_tend, coords1 = xy_frag_low,
+                                   comm2 = frag_high_tend, coords2 = xy_frag_high,
+                                   spat_effort = spat_eff, nperm = 30)
+```
+
+```{r, eval = F}
+delta_dat2 <- bind_rows(delta_t0, delta_tend)
+delta_dat2$time <- rep(c("t0","tend"), each = length(spat_eff))
+```
+
+```{r, eval = F}
+ggplot(delta_dat2, aes(spatial_effort, obs)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "grey") +
+  geom_line(aes(y = obs),linewidth = 2, color = "red") +
+  geom_hline(yintercept = 0) +
+  facet_grid(~time) +
+  ylab("Delta S")
+```
+
+In these figures, the red lines are the observed differences between the
+spexSBR curves for t0 and tend. The grey ribbons are the confidence
+intervals from the the null-model, where samples are randomly permuted
+between high and low fragmentation scenarios.

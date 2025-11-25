@@ -13,12 +13,12 @@ Imports:
     stats,
     vegan,
     scam
-Suggests: 
+Suggests:
+    tidyverse,
     knitr,
-    rmarkdown,
-    tidyverse
+    rmarkdown
 URL: https://github.com/FelixMay/spatialbiodiv
 BugReports: https://github.com/FelixMay/spatialbiodiv/issues
 Roxygen: list(markdown = TRUE)
-RoxygenNote: 7.2.2
+RoxygenNote: 7.2.3
 VignetteBuilder: knitr

@@ -1,0 +1,225 @@
+---
+title: "Test analyses of simulated data using mobr package"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Test analyses of simulated data}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+#library(spatialbiodiv)
+library(tidyverse)
+library(vegan)
+library(scam)
+library(mobr)
+knitr::opts_knit$set(root.dir = "..")
+```
+
+# Read and prepare the data
+
+```{r}
+setwd("..")
+simdat1 <- read.table("data_raw/dispersal_4_rep_1_output_sample.csv", header = TRUE,
+                      sep = ",")
+#simdat1 <- simdat1 %>% select(-X)
+```
+
+Filter high and low fragmentation scenarios
+
+```{r}
+frag_low <- simdat1 %>%
+  filter(sim_id == 10 & step == 41)
+
+frag_high <- simdat1 %>%
+  filter(sim_id == 18 & step == 41)
+```
+
+## Prepare data for spatial biodiversity curves
+
+Get abundance tables with rows in samples and species in columns
+
+```{r}
+frag01_spec <- frag_low %>%
+  select(sp_1:sp_1000)
+
+frag05_spec <- frag_high %>%
+  select(sp_1:sp_1000)
+```
+
+Get spatial coordinates of the samples
+
+```{r}
+xy_frag01 <-  frag_low %>%
+  select(loc_x, loc_y)
+
+xy_frag05 <-  frag_high %>%
+  select(loc_x, loc_y)
+```
+
+# Plot coordinates of the samples
+
+```{r}
+xy_coords <- bind_rows(xy_frag01, xy_frag05)
+xy_coords$fragmentation <-  rep(c("Low", "High"), each = nrow(xy_frag01))
+```
+
+
+```{r}
+ggplot(xy_coords, aes(loc_x, loc_y)) +
+  geom_point() +
+  facet_grid(~fragmentation) +
+  coord_fixed()
+```
+
+# Calculate non-spatial sample-based rarefaction curves (SBR)
+
+```{r}
+SBR_frag01 <- rarefaction(frag01_spec, method = "SBR")
+SBR_frag05 <- rarefaction(frag05_spec, method = "SBR")
+```
+
+```{r}
+SBR_data <- data.frame(nsamples = rep(1:nrow(frag01_spec), 2),
+                       S       = c(SBR_frag01, SBR_frag05),
+                       fragmentation = rep(c("Low", "High"),
+                                           each = nrow(xy_frag01)))
+```
+
+## Plot SBR curves
+
+```{r}
+ggplot(SBR_data, aes(nsamples, S, color = fragmentation)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Non-spatial rarefaction curves")
+```
+
+
+# Calculate spatial sample-based rarefaction curves (sSBR)
+
+## With kNN-Algorithm
+```{r}
+sSBR_frag01 <- rarefaction(frag01_spec,
+                           method = "spexSBR",
+                           coords = xy_frag01,
+                           latlong = F,
+                           spat_algo = "kNN")
+
+sSBR_frag05 <- rarefaction(frag05_spec,
+                           method = "spexSBR",
+                           coords = xy_frag05,
+                           latlong = F,
+                           spat_algo = "kNN")
+
+```
+
+
+### Create dataframe for plotting with ggplot
+
+```{r}
+sSBR_data = data.frame(distance = as.numeric(c(names(sSBR_frag01),            
+                                               names(sSBR_frag05))),
+                       S        = c(sSBR_frag01,sSBR_frag05),
+                       fragmentation = rep(c("Low", "High"),
+                                           each = length(sSBR_frag01))
+                       )
+```
+
+### Plot the sSBR curves
+
+```{r}
+ggplot(sSBR_data, aes(distance, S, color = fragmentation)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Spatial rarefaction curve with nearest-neighbor distance")
+```
+
+## With convexhull-Algorithm
+
+```{r}
+sSBR_frag01 <- rarefaction(frag01_spec,
+                           method = "spexSBR",
+                           coords = xy_frag01,
+                           latlong = F,
+                           spat_algo = "convexhull")
+
+sSBR_frag05 <- rarefaction(frag05_spec,
+                           method = "spexSBR",
+                           coords = xy_frag05,
+                           latlong = F,
+                           spat_algo = "convexhull")
+
+```
+
+
+### Create dataframe for plotting with ggplot
+
+```{r}
+sSBR_data2 = data.frame(area = as.numeric(c(names(sSBR_frag01),
+                                            names(sSBR_frag05))),
+                       S        = c(sSBR_frag01,sSBR_frag05),
+                       fragmentation = rep(c("Low", "High"),
+                                           each =length(sSBR_frag01))
+                       )
+```
+
+### Plot the sSBR curves
+
+```{r}
+ggplot(sSBR_data2, aes(area, S, color = fragmentation)) +
+  geom_point() +
+  geom_line() +
+  ggtitle("Spatial rarefaction curve with convex-hull area")
+```
+
+# Get the difference for the spexSBR curves
+
+## Get the distance / area values from the curve with the smaller extent
+
+```{r}
+spat_eff <- sSBR_data2 %>%
+  filter(fragmentation == "Low") %>%
+  select(area)
+spat_eff <- as.numeric(spat_eff[[1]])
+```
+
+
+## Use distance function
+
+```{r}
+delta_spexSBR1 <- get_spexSBR_dist(comm1 = frag01_spec, coords1 = xy_frag01,
+                                   comm2 = frag05_spec, coords2 = xy_frag05,
+                                   spat_effort = spat_eff)
+```
+
+```{r}
+ggplot(delta_spexSBR1, aes(spatial_effort, delta)) +
+  geom_point() + geom_line()
+```
+# Null-model with lower and upper bound
+
+```{r}
+delta1 <- get_spexSBR_interval(comm1 = frag01_spec, coords1 = xy_frag01,
+                               comm2 = frag05_spec, coords2 = xy_frag05,
+                               spat_effort = spat_eff,
+                               nperm = 30)
+```
+
+
+```{r}
+ggplot(delta1, aes(spatial_effort, obs)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), fill = "grey") +
+  geom_line(aes(y = obs),linewidth = 2, color = "red") +
+  geom_hline(yintercept = 0)
+```
+
+
+
